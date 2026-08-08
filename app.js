@@ -23,6 +23,7 @@ const STATS_KEY = 'animeroom_stats';
 const WATCHED_KEY = 'animeroom_watched';
 const WATCHED_LIMIT = 60;
 const AVATAR_KEY = 'animeroom_avatar';
+const COMMENTS_KEY = 'animeroom_comments';
 
 // ——— XP / уровень (по времени на сайте) ———
 // Порог 1 ур. — 10ч, дальше каждые +5ч новый уровень (15, 20, 25...)
@@ -148,7 +149,13 @@ const i18n = {
     authErrorExists: 'Такой ник уже занят',
     authErrorWrong: 'Неверный ник или пароль',
     authSuccessReg: 'Регистрация успешна!',
-    authSuccessLogin: 'Вход выполнен'
+    authSuccessLogin: 'Вход выполнен',
+    comments: 'Комментарии',
+    commentPlaceholder: 'Поделитесь мнением об аниме...',
+    commentPost: 'Отправить',
+    commentsEmpty: 'Пока нет комментариев. Будьте первым!',
+    commentLoginHint: 'Войдите, чтобы оставить комментарий',
+    commentDelete: 'Удалить комментарий'
   },
   en: {
     searchPlaceholder: 'Search anime...',
@@ -258,7 +265,13 @@ const i18n = {
     authErrorExists: 'This nickname is already taken',
     authErrorWrong: 'Wrong nickname or password',
     authSuccessReg: 'Registration successful!',
-    authSuccessLogin: 'Logged in'
+    authSuccessLogin: 'Logged in',
+    comments: 'Comments',
+    commentPlaceholder: 'Share your thoughts about this anime...',
+    commentPost: 'Post',
+    commentsEmpty: 'No comments yet. Be the first!',
+    commentLoginHint: 'Log in to leave a comment',
+    commentDelete: 'Delete comment'
   }
 };
 
@@ -403,6 +416,131 @@ function toggleFavorite(anime) {
   }
   saveFavorites();
   return isFavorite(id);
+}
+
+// ——— Comments (localStorage, под плеером в модалке) ———
+function loadAllComments() {
+  try {
+    return JSON.parse(localStorage.getItem(COMMENTS_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function saveAllComments(map) {
+  localStorage.setItem(COMMENTS_KEY, JSON.stringify(map));
+}
+
+function getComments(animeId) {
+  const map = loadAllComments();
+  return (map[String(animeId)] || []).slice().sort(function(a, b) { return b.createdAt - a.createdAt; });
+}
+
+function addComment(animeId, text) {
+  if (!state.user) return;
+  const map = loadAllComments();
+  const id = String(animeId);
+  if (!map[id]) map[id] = [];
+  map[id].push({
+    cid: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    nick: state.user.nick,
+    avatar: loadAvatar(),
+    text: text,
+    createdAt: Date.now()
+  });
+  saveAllComments(map);
+}
+
+function deleteComment(animeId, cid) {
+  const map = loadAllComments();
+  const id = String(animeId);
+  if (!map[id]) return;
+  map[id] = map[id].filter(function(c) { return c.cid !== cid; });
+  saveAllComments(map);
+}
+
+function formatCommentDate(ts) {
+  try {
+    return new Date(ts).toLocaleString(state.lang === 'en' ? 'en-US' : 'ru-RU', {
+      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+  } catch {
+    return '';
+  }
+}
+
+function renderCommentsListHtml(animeId) {
+  const list = getComments(animeId);
+  if (!list.length) return '<p class="comments-empty">' + t('commentsEmpty') + '</p>';
+  return list.map(function(c) {
+    const mine = !!(state.user && state.user.nick === c.nick);
+    const avatarHtml = c.avatar
+      ? '<img src="' + c.avatar + '" alt="" class="comment-avatar-img">'
+      : '<span class="comment-avatar-placeholder">🙂</span>';
+    return (
+      '<div class="comment-item">' +
+        '<div class="comment-avatar">' + avatarHtml + '</div>' +
+        '<div class="comment-body">' +
+          '<div class="comment-head">' +
+            '<span class="comment-nick">' + escapeHtml(c.nick) + '</span>' +
+            '<span class="comment-date">' + formatCommentDate(c.createdAt) + '</span>' +
+            (mine ? '<button type="button" class="comment-delete" data-cid="' + escapeHtml(c.cid) + '" title="' + t('commentDelete') + '">×</button>' : '') +
+          '</div>' +
+          '<p class="comment-text">' + escapeHtml(c.text).replace(/\n/g, '<br>') + '</p>' +
+        '</div>' +
+      '</div>'
+    );
+  }).join('');
+}
+
+function renderCommentsSectionHtml(animeId) {
+  const formHtml = state.user
+    ? (
+      '<form class="comment-form" id="commentForm">' +
+        '<textarea id="commentInput" class="comment-input" maxlength="500" placeholder="' + escapeHtml(t('commentPlaceholder')) + '" required></textarea>' +
+        '<button type="submit" class="btn-primary comment-submit">' + t('commentPost') + '</button>' +
+      '</form>'
+    )
+    : '<button type="button" class="comment-login-hint" id="commentLoginHint">' + escapeHtml(t('commentLoginHint')) + '</button>';
+
+  return (
+    '<div class="comments-section">' +
+      '<h3>' + t('comments') + '</h3>' +
+      formHtml +
+      '<div class="comments-list" id="commentsList">' + renderCommentsListHtml(animeId) + '</div>' +
+    '</div>'
+  );
+}
+
+function bindCommentDeleteButtons(animeId) {
+  document.querySelectorAll('.comment-delete').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      deleteComment(animeId, btn.dataset.cid);
+      const listEl = document.getElementById('commentsList');
+      if (listEl) listEl.innerHTML = renderCommentsListHtml(animeId);
+      bindCommentDeleteButtons(animeId);
+    });
+  });
+}
+
+function attachCommentsHandlers(animeId) {
+  const form = document.getElementById('commentForm');
+  if (form) {
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      const input = document.getElementById('commentInput');
+      const text = input.value.trim();
+      if (!text) return;
+      addComment(animeId, text);
+      input.value = '';
+      const listEl = document.getElementById('commentsList');
+      if (listEl) listEl.innerHTML = renderCommentsListHtml(animeId);
+      bindCommentDeleteButtons(animeId);
+    });
+  }
+  const loginHint = document.getElementById('commentLoginHint');
+  if (loginHint) loginHint.addEventListener('click', openAuthModal);
+  bindCommentDeleteButtons(animeId);
 }
 
 // ——— Auth (localStorage) ———
@@ -1868,6 +2006,8 @@ async function openModal(id) {
       trailerHtml = '<div class="trailer-container" id="trailerBox"><iframe src="https://www.youtube.com/embed/' + anime.trailer.id + '" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"></iframe></div>';
     }
 
+    const commentsHtml = renderCommentsSectionHtml(anime.id);
+
     const recs = (anime.recommendations && anime.recommendations.nodes || [])
       .map(function(n) { return n.mediaRecommendation; })
       .filter(Boolean);
@@ -1921,6 +2061,7 @@ async function openModal(id) {
           '<a href="' + anime.siteUrl + '" target="_blank" rel="noopener" class="mal-btn">AniList →</a>' +
         '</div>' +
         watchBoxHtml +
+        commentsHtml +
       '</div>' +
       recsHtml;
 
@@ -1987,6 +2128,8 @@ async function openModal(id) {
         openModal(c.dataset.id);
       });
     });
+
+    attachCommentsHandlers(anime.id);
   } catch (err) {
     elements.modalBody.innerHTML = '<div style="grid-column:1/-1;padding:40px;text-align:center;color:var(--danger)">' + escapeHtml(err.message) + '</div>';
   }
