@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AnimeRoom — AniList</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js" defer></script>
+</head>
+<body>
+  <div id="bgLayer" class="bg-layer" aria-hidden="true"></div>
+  <div id="bgLayerNext" class="bg-layer bg-layer-next" aria-hidden="true"></div>
+  <header class="header">
+    <div class="container header-inner">
+      <a href="#" class="logo" id="logo">
+        <span class="logo-icon">✦</span>
+        <span>AnimeRoom</span>
+      </a>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="Поиск аниме..." autocomplete="off" data-i18n-placeholder="searchPlaceholder">
+        <button id="searchBtn" aria-label="Поиск">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+        </button>
+      </div>
+      <nav class="nav">
+        <button class="nav-btn active" data-filter="top" data-i18n="navTop">Топ</button>
+        <button class="nav-btn" data-filter="airing" data-i18n="navAiring">Онгоинг</button>
+        <button class="nav-btn" data-filter="upcoming" data-i18n="navUpcoming">Анонсы</button>
+        <button class="nav-btn" data-filter="movie" data-i18n="navMovie">Фильмы</button>
+        <button class="nav-btn" data-filter="favorites" id="favNavBtn">
+          ♥ <span data-i18n="navFavorites">Избранное</span> <span class="fav-count" id="favCount">0</span>
+        </button>
+      </nav>
+      <div class="user-actions">
+        <button id="authBtn" class="user-btn" data-i18n="login">Войти</button>
+        <button id="profileBtn" class="user-btn profile-btn hidden" title="Профиль" data-i18n-title="profile">👤</button>
+        <button id="settingsBtn" class="user-btn settings-btn hidden" title="Настройки">⚙</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="container">
+      <div class="filters" id="filters">
+        <div class="filter-group">
+          <label for="genreSelect" data-i18n="genre">Жанр</label>
+          <select id="genreSelect"><option value="" data-i18n="allGenres">Все жанры</option></select>
+        </div>
+        <div class="filter-group">
+          <label for="seasonSelect" data-i18n="season">Сезон</label>
+          <select id="seasonSelect">
+            <option value="" data-i18n="any">Любой</option>
+            <option value="WINTER" data-i18n="winter">Зима</option>
+            <option value="SPRING" data-i18n="spring">Весна</option>
+            <option value="SUMMER" data-i18n="summer">Лето</option>
+            <option value="FALL" data-i18n="fall">Осень</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="yearSelect" data-i18n="year">Год</label>
+          <select id="yearSelect"><option value="" data-i18n="any">Любой</option></select>
+        </div>
+        <div class="filter-group">
+          <label for="studioInput" data-i18n="studio">Студия</label>
+          <input type="text" id="studioInput" placeholder="Kyoto Animation..." list="studioList" autocomplete="off">
+          <datalist id="studioList"></datalist>
+        </div>
+        <div class="filter-group">
+          <label for="sortSelect" data-i18n="sort">Сортировка</label>
+          <select id="sortSelect">
+            <option value="SCORE_DESC" data-i18n="sortScore">По рейтингу</option>
+            <option value="POPULARITY_DESC" data-i18n="sortPopularity">По популярности</option>
+            <option value="TRENDING_DESC" data-i18n="sortTrending">В тренде</option>
+            <option value="START_DATE_DESC" data-i18n="sortNew">Новинки</option>
+            <option value="TITLE_ROMAJI" data-i18n="sortTitle">По названию</option>
+          </select>
+        </div>
+        <div class="filter-group filter-actions">
+          <button id="applyFilters" class="btn-primary" data-i18n="apply">Применить</button>
+          <button id="resetFilters" class="btn-secondary" data-i18n="reset">Сбросить</button>
+        </div>
+      </div>
+
+      <div class="section-header">
+        <h1 id="sectionTitle">Топ аниме</h1>
+        <p id="sectionSubtitle">Данные AniList</p>
+      </div>
+
+      <div id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <p data-i18n="loading">Загрузка...</p>
+      </div>
+
+      <div id="error" class="error hidden"></div>
+      <div id="animeGrid" class="anime-grid"></div>
+
+      <div id="pagination" class="pagination hidden">
+        <button id="prevPage" class="page-btn" data-i18n="prev">← Назад</button>
+        <span id="pageInfo">Страница 1</span>
+        <button id="nextPage" class="page-btn" data-i18n="next">Вперёд →</button>
+      </div>
+    </div>
+  </main>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <button class="modal-close" id="modalClose">×</button>
+      <div id="modalBody" class="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Auth Modal -->
+  <div id="authModal" class="modal hidden">
+    <div class="modal-backdrop" id="authBackdrop"></div>
+    <div class="modal-content auth-modal-content">
+      <button class="modal-close" id="authClose">×</button>
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-tab="login" data-i18n="login">Войти</button>
+        <button class="auth-tab" data-tab="register" data-i18n="register">Регистрация</button>
+      </div>
+      <form id="authForm" class="auth-form">
+        <div class="form-group">
+          <label for="authNick" data-i18n="nickname">Ник</label>
+          <input type="text" id="authNick" required minlength="2" maxlength="24" autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label for="authPass" data-i18n="password">Пароль</label>
+          <input type="password" id="authPass" required minlength="4" maxlength="64" autocomplete="current-password">
+        </div>
+        <p id="authError" class="auth-error hidden"></p>
+        <button type="submit" class="btn-primary auth-submit" data-i18n="login">Войти</button>
+      </form>
+</div>
+  </div>
+
+  <!-- Profile Modal -->
+  <div id="profileModal" class="modal hidden">
+    <div class="modal-backdrop" id="profileBackdrop"></div>
+    <div class="modal-content profile-modal-content">
+      <button class="modal-close" id="profileClose">×</button>
+      <h2 data-i18n="profile">Профиль</h2>
+
+      <div class="profile-avatar-wrap">
+        <button type="button" class="profile-avatar-btn" id="avatarBtn" title="Изменить аватар" data-i18n-title="changeAvatar">
+          <img id="avatarImg" class="profile-avatar-img hidden" alt="">
+          <span id="avatarPlaceholder" class="profile-avatar-placeholder">🙂</span>
+          <span class="profile-avatar-edit">✎</span>
+        </button>
+        <input type="file" id="avatarInput" accept="image/*" class="hidden">
+      </div>
+
+      <div class="profile-info">
+        <div class="profile-row">
+          <span class="profile-label" data-i18n="nickname">Ник</span>
+          <span id="profileNick" class="profile-value">—</span>
+        </div>
+        <div class="profile-row">
+          <span class="profile-label" data-i18n="timeOnSite">Время на сайте</span>
+          <span id="profileTime" class="profile-value">0 ч</span>
+        </div>
+      </div>
+
+      <div class="xp-block">
+        <div class="xp-head">
+          <span class="xp-level" id="xpLevel">Уровень 0</span>
+        </div>
+        <div class="xp-bar"><div class="xp-bar-fill" id="xpBarFill"></div></div>
+      </div>
+
+      <div class="library-section">
+        <h3 data-i18n="watchedTitle">Просмотренные</h3>
+        <div class="mini-grid" id="watchedGrid"></div>
+      </div>
+      <div class="library-section">
+        <h3 data-i18n="favTitle">Избранное</h3>
+        <div class="mini-grid" id="favGrid"></div>
+      </div>
+
+      <button id="logoutBtn" class="btn-secondary" data-i18n="logout">Выйти</button>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-backdrop" id="settingsBackdrop"></div>
+    <div class="modal-content settings-modal-content">
+      <button class="modal-close" id="settingsClose">×</button>
+      <h2 data-i18n="settings">Настройки</h2>
+
+      <div class="settings-tabs">
+        <button type="button" class="settings-tab active" data-stab="theme" data-i18n="themeColor">Цвет фона</button>
+        <button type="button" class="settings-tab" data-stab="language" data-i18n="language">Язык</button>
+      </div>
+
+      <!-- Theme tab -->
+      <div class="settings-panel active" id="panel-theme">
+        <p class="settings-hint" data-i18n="themeHint">Текст всегда белый. Колесо меняет цвет фона за постерами.</p>
+        <div class="color-wheel-wrap">
+          <canvas id="colorWheel" width="220" height="220"></canvas>
+          <div class="color-preview" id="colorPreview"></div>
+        </div>
+        <div class="theme-presets">
+          <button type="button" class="preset-btn" data-color="#0b0d12" style="background:#0b0d12" title="Чёрный"></button>
+          <button type="button" class="preset-btn" data-color="#1a0a2e" style="background:#1a0a2e" title="Тёмно-фиолетовый"></button>
+          <button type="button" class="preset-btn" data-color="#0a1628" style="background:#0a1628" title="Тёмно-синий"></button>
+          <button type="button" class="preset-btn" data-color="#0a1f14" style="background:#0a1f14" title="Тёмно-зелёный"></button>
+          <button type="button" class="preset-btn" data-color="#1f0a0a" style="background:#1f0a0a" title="Тёмно-красный"></button>
+          <button type="button" class="preset-btn" data-color="#1a1208" style="background:#1a1208" title="Тёмно-коричневый"></button>
+          <button type="button" class="preset-btn" data-color="#0d1a1a" style="background:#0d1a1a" title="Тёмно-бирюзовый"></button>
+        </div>
+      </div>
+
+      <!-- Language tab -->
+      <div class="settings-panel" id="panel-language">
+        <div class="lang-switch">
+          <button type="button" class="lang-btn active" data-lang="ru">Русский</button>
+          <button type="button" class="lang-btn" data-lang="en">English</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="container">
+      <p data-i18n="footer">Данные <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a>. Избранное хранится локально в браузере.</p>
+    </div>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>
