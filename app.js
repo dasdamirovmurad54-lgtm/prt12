@@ -443,7 +443,7 @@ function toggleFavorite(anime) {
 //      и "anon public" ключ и вставьте их ниже вместо заглушек.
 // Пока значения не заменены, приложение автоматически работает в резервном
 // режиме — комментарии сохраняются только в localStorage текущего браузера.
-const SUPABASE_URL = 'https://ougbcvafsamqtvdnznqz.supabase.co';
+const SUPABASE_URL = 'https://ougbcvafsamqtvdnznqz.supabase.co/rest/v1/';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im91Z2JjdmFmc2FtcXR2ZG56bnF6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyMDkxNTIsImV4cCI6MjEwMTc4NTE1Mn0.l0j0SySd3ehLqxvFg5ibF397Hm0BI2CVIpRPZGkA7vE';
 const SUPABASE_CONFIGURED = SUPABASE_URL.indexOf('YOUR-PROJECT') === -1 && SUPABASE_ANON_KEY.indexOf('YOUR-ANON-KEY') === -1;
 const COMMENTS_POLL_MS = 15000;
