@@ -1024,6 +1024,154 @@ body {
   color: #fff;
 }
 
+/* Comments section in modal (под плеером) */
+.comments-section {
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+
+.comments-section h3 {
+  font-size: 1.1rem;
+  margin-bottom: 12px;
+}
+
+.comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.comment-input {
+  width: 100%;
+  min-height: 70px;
+  resize: vertical;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.comment-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.comment-submit {
+  align-self: flex-end;
+  padding: 9px 20px;
+}
+
+.comment-login-hint {
+  display: inline-block;
+  margin-bottom: 18px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.comment-login-hint:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.comments-empty {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.comment-item {
+  display: flex;
+  gap: 10px;
+}
+
+.comment-avatar {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+.comment-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.comment-avatar-placeholder {
+  font-size: 1rem;
+}
+
+.comment-body {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.comment-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.comment-nick {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.comment-date {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.comment-delete {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 2px;
+  transition: color 0.2s;
+}
+
+.comment-delete:hover {
+  color: var(--danger);
+}
+
+.comment-text {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 /* Recommendations section in modal */
 .recs-section {
   margin-top: 28px;
