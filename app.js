@@ -418,8 +418,46 @@ function toggleFavorite(anime) {
   return isFavorite(id);
 }
 
-// ——— Comments (localStorage, под плеером в модалке) ———
-function loadAllComments() {
+// ——— Comments (общие для всех пользователей через Supabase REST API) ———
+// Комментарии, в отличие от избранного, должны быть видны всем посетителям
+// сайта, а не только в браузере автора — localStorage для этого не подходит,
+// он живёт только на одном устройстве. Поэтому комментарии хранятся в общей
+// таблице на Supabase (бесплатный облачный Postgres с готовым REST API).
+//
+// Чтобы включить общие комментарии, один раз настройте бесплатный проект:
+//   1. Зарегистрируйтесь на https://supabase.com и создайте проект (Free tier).
+//   2. В SQL Editor выполните:
+//        create table comments (
+//          id uuid primary key default gen_random_uuid(),
+//          anime_id text not null,
+//          nick text not null,
+//          avatar text,
+//          text text not null,
+//          created_at timestamptz not null default now()
+//        );
+//        alter table comments enable row level security;
+//        create policy "public read" on comments for select using (true);
+//        create policy "public insert" on comments for insert with check (true);
+//        create policy "public delete" on comments for delete using (true);
+//   3. В настройках проекта (Project Settings → API) скопируйте "Project URL"
+//      и "anon public" ключ и вставьте их ниже вместо заглушек.
+// Пока значения не заменены, приложение автоматически работает в резервном
+// режиме — комментарии сохраняются только в localStorage текущего браузера.
+const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+const SUPABASE_ANON_KEY = 'YOUR-ANON-KEY';
+const SUPABASE_CONFIGURED = SUPABASE_URL.indexOf('YOUR-PROJECT') === -1 && SUPABASE_ANON_KEY.indexOf('YOUR-ANON-KEY') === -1;
+const COMMENTS_POLL_MS = 15000;
+let commentsPollTimer = null;
+
+function supabaseHeaders(extra) {
+  return Object.assign({
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: 'Bearer ' + SUPABASE_ANON_KEY
+  }, extra || {});
+}
+
+// ——— Резервное хранилище на случай, если Supabase не настроен ———
+function loadLocalComments() {
   try {
     return JSON.parse(localStorage.getItem(COMMENTS_KEY) || '{}');
   } catch {
@@ -427,36 +465,90 @@ function loadAllComments() {
   }
 }
 
-function saveAllComments(map) {
+function saveLocalComments(map) {
   localStorage.setItem(COMMENTS_KEY, JSON.stringify(map));
 }
 
-function getComments(animeId) {
-  const map = loadAllComments();
+function getLocalComments(animeId) {
+  const map = loadLocalComments();
   return (map[String(animeId)] || []).slice().sort(function(a, b) { return b.createdAt - a.createdAt; });
 }
 
-function addComment(animeId, text) {
-  if (!state.user) return;
-  const map = loadAllComments();
+function addLocalComment(animeId, nick, avatar, text) {
+  const map = loadLocalComments();
   const id = String(animeId);
   if (!map[id]) map[id] = [];
   map[id].push({
     cid: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
-    nick: state.user.nick,
-    avatar: loadAvatar(),
+    nick: nick,
+    avatar: avatar,
     text: text,
     createdAt: Date.now()
   });
-  saveAllComments(map);
+  saveLocalComments(map);
 }
 
-function deleteComment(animeId, cid) {
-  const map = loadAllComments();
+function deleteLocalComment(animeId, cid) {
+  const map = loadLocalComments();
   const id = String(animeId);
   if (!map[id]) return;
   map[id] = map[id].filter(function(c) { return c.cid !== cid; });
-  saveAllComments(map);
+  saveLocalComments(map);
+}
+
+// ——— Общие функции (Supabase, с откатом на localStorage при ошибке) ———
+async function getComments(animeId) {
+  if (SUPABASE_CONFIGURED) {
+    try {
+      const url = SUPABASE_URL + '/rest/v1/comments?anime_id=eq.' + encodeURIComponent(String(animeId)) +
+        '&select=id,nick,avatar,text,created_at&order=created_at.desc';
+      const res = await fetch(url, { headers: supabaseHeaders() });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const rows = await res.json();
+      return rows.map(function(r) {
+        return { cid: r.id, nick: r.nick, avatar: r.avatar, text: r.text, createdAt: new Date(r.created_at).getTime() };
+      });
+    } catch (e) {
+      console.warn('Supabase comments fetch failed, using local fallback', e);
+    }
+  }
+  return getLocalComments(animeId);
+}
+
+async function addComment(animeId, text) {
+  if (!state.user) return;
+  const nick = state.user.nick;
+  const avatar = loadAvatar() || null;
+  if (SUPABASE_CONFIGURED) {
+    try {
+      const res = await fetch(SUPABASE_URL + '/rest/v1/comments', {
+        method: 'POST',
+        headers: supabaseHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+        body: JSON.stringify({ anime_id: String(animeId), nick: nick, avatar: avatar, text: text })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return;
+    } catch (e) {
+      console.warn('Supabase comment insert failed, saving locally instead', e);
+    }
+  }
+  addLocalComment(animeId, nick, avatar, text);
+}
+
+async function deleteComment(animeId, cid) {
+  if (SUPABASE_CONFIGURED) {
+    try {
+      const res = await fetch(SUPABASE_URL + '/rest/v1/comments?id=eq.' + encodeURIComponent(cid), {
+        method: 'DELETE',
+        headers: supabaseHeaders()
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return;
+    } catch (e) {
+      console.warn('Supabase comment delete failed, trying local fallback', e);
+    }
+  }
+  deleteLocalComment(animeId, cid);
 }
 
 function formatCommentDate(ts) {
@@ -469,8 +561,7 @@ function formatCommentDate(ts) {
   }
 }
 
-function renderCommentsListHtml(animeId) {
-  const list = getComments(animeId);
+function commentsListToHtml(list) {
   if (!list.length) return '<p class="comments-empty">' + t('commentsEmpty') + '</p>';
   return list.map(function(c) {
     const mine = !!(state.user && state.user.nick === c.nick);
@@ -493,7 +584,7 @@ function renderCommentsListHtml(animeId) {
   }).join('');
 }
 
-function renderCommentsSectionHtml(animeId) {
+function renderCommentsSectionHtml() {
   const formHtml = state.user
     ? (
       '<form class="comment-form" id="commentForm">' +
@@ -507,18 +598,28 @@ function renderCommentsSectionHtml(animeId) {
     '<div class="comments-section">' +
       '<h3>' + t('comments') + '</h3>' +
       formHtml +
-      '<div class="comments-list" id="commentsList">' + renderCommentsListHtml(animeId) + '</div>' +
+      '<div class="comments-list" id="commentsList"><p class="comments-empty">' + escapeHtml(t('loading')) + '</p></div>' +
     '</div>'
   );
+}
+
+async function refreshCommentsList(animeId) {
+  const listEl = document.getElementById('commentsList');
+  if (!listEl) return;
+  const list = await getComments(animeId);
+  // модалка могла успеть закрыться/смениться, пока шёл запрос
+  if (!document.getElementById('commentsList') || elements.modal.classList.contains('hidden')) return;
+  listEl.innerHTML = commentsListToHtml(list);
+  bindCommentDeleteButtons(animeId);
 }
 
 function bindCommentDeleteButtons(animeId) {
   document.querySelectorAll('.comment-delete').forEach(function(btn) {
     btn.addEventListener('click', function() {
-      deleteComment(animeId, btn.dataset.cid);
-      const listEl = document.getElementById('commentsList');
-      if (listEl) listEl.innerHTML = renderCommentsListHtml(animeId);
-      bindCommentDeleteButtons(animeId);
+      btn.disabled = true;
+      deleteComment(animeId, btn.dataset.cid).finally(function() {
+        refreshCommentsList(animeId);
+      });
     });
   });
 }
@@ -529,18 +630,33 @@ function attachCommentsHandlers(animeId) {
     form.addEventListener('submit', function(e) {
       e.preventDefault();
       const input = document.getElementById('commentInput');
+      const submitBtn = form.querySelector('.comment-submit');
       const text = input.value.trim();
       if (!text) return;
-      addComment(animeId, text);
-      input.value = '';
-      const listEl = document.getElementById('commentsList');
-      if (listEl) listEl.innerHTML = renderCommentsListHtml(animeId);
-      bindCommentDeleteButtons(animeId);
+      if (submitBtn) submitBtn.disabled = true;
+      addComment(animeId, text).finally(function() {
+        input.value = '';
+        if (submitBtn) submitBtn.disabled = false;
+        refreshCommentsList(animeId);
+      });
     });
   }
   const loginHint = document.getElementById('commentLoginHint');
   if (loginHint) loginHint.addEventListener('click', openAuthModal);
-  bindCommentDeleteButtons(animeId);
+
+  refreshCommentsList(animeId);
+
+  if (commentsPollTimer) clearInterval(commentsPollTimer);
+  if (SUPABASE_CONFIGURED) {
+    commentsPollTimer = setInterval(function() { refreshCommentsList(animeId); }, COMMENTS_POLL_MS);
+  }
+}
+
+function stopCommentsPolling() {
+  if (commentsPollTimer) {
+    clearInterval(commentsPollTimer);
+    commentsPollTimer = null;
+  }
 }
 
 // ——— Auth (localStorage) ———
@@ -2006,7 +2122,7 @@ async function openModal(id) {
       trailerHtml = '<div class="trailer-container" id="trailerBox"><iframe src="https://www.youtube.com/embed/' + anime.trailer.id + '" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"></iframe></div>';
     }
 
-    const commentsHtml = renderCommentsSectionHtml(anime.id);
+    const commentsHtml = renderCommentsSectionHtml();
 
     const recs = (anime.recommendations && anime.recommendations.nodes || [])
       .map(function(n) { return n.mediaRecommendation; })
@@ -2137,6 +2253,7 @@ async function openModal(id) {
 
 function closeModal() {
   anilibriaDestroyPlayer();
+  stopCommentsPolling();
   elements.modal.classList.add('hidden');
   elements.modalBody.innerHTML = '';
 }
