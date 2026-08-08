@@ -1,12 +1,14 @@
 const ANILIST_URL = 'https://graphql.anilist.co';
-// AniLibria API v3 — https://github.com/anilibria/docs/blob/master/api_v3.md
-// Ни api.anilibria.tv/v3, ни легаси www.anilibria.tv/public/api/index.php не
-// присылают заголовок Access-Control-Allow-Origin, поэтому браузер блокирует
-// прямой fetch (сервер отвечает 200, но JS не может прочитать тело).
-// Поэтому запросы идут через публичный CORS-прокси allorigins.win.
-// ⚠️ Это сторонний сервис: может быть медленным, иметь лимиты или временно
-// не работать — тогда показывается ссылка на ручной поиск на AniLibria.
-const ANILIBRIA_API = 'https://api.anilibria.tv/v3';
+// AniLibria.tv была переименована в AniLiberty вместе с полным переходом на
+// новый бэкенд — старый api.anilibria.tv/v3 (и легаси public/api/index.php)
+// официально deprecated и по факту не отвечает. Актуальный API — api.anilibria.app
+// (он же зеркалится на anilibria.top / aniliberty.top), но публичной схемы
+// ответа у него нет, поэтому парсинг ниже сделан defensively: пробует
+// несколько вероятных вариантов названия полей вместо одного жёстко заданного.
+// Запросы всё ещё идут через публичный CORS-прокси allorigins.win, так как
+// неизвестно, отдаёт ли новый API заголовок Access-Control-Allow-Origin.
+const ANILIBRIA_API = 'https://api.anilibria.app/api/v1';
+const ANILIBRIA_ORIGIN = 'https://anilibria.top';
 const ANILIBRIA_CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 const PER_PAGE = 24;
 const FAV_KEY = 'animeroom_favorites';
@@ -1566,21 +1568,86 @@ async function anilibriaFetch(path) {
 
 function anilibriaExtractList(json) {
   if (Array.isArray(json)) return json;
+  if (json && Array.isArray(json.data)) return json.data;
   if (json && Array.isArray(json.list)) return json.list;
+  if (json && Array.isArray(json.items)) return json.items;
+  if (json && Array.isArray(json.releases)) return json.releases;
   if (json && json.id) return [json];
   return [];
 }
 
-async function anilibriaSearch(query) {
-  const q = encodeURIComponent(query);
-  const json = await anilibriaFetch('/title/search?search=' + q + '&limit=8&filter=id,code,names,type,status,posters,player,blocked');
-  return anilibriaExtractList(json);
+// Абсолютный URL для картинок/видео: новый API может отдавать как полные
+// ссылки, так и относительные пути (тогда достраиваем их от anilibria.top).
+function anilibriaAbsUrl(u) {
+  if (!u || typeof u !== 'string') return '';
+  if (/^https?:\/\//i.test(u)) return u;
+  if (u.indexOf('//') === 0) return 'https:' + u;
+  if (u.indexOf('/') === 0) return ANILIBRIA_ORIGIN + u;
+  return u;
+}
+
+function anilibriaName(r) {
+  const n = r.name || r.names || {};
+  const main = n.main || n.ru || n.russian || r.alias || r.code || ('#' + r.id);
+  const sub = n.english || n.en || n.alternative || n.alt || '';
+  return { main: main, sub: sub === main ? '' : sub };
 }
 
 function anilibriaPosterUrl(release) {
-  const p = release.posters && (release.posters.medium || release.posters.small || release.posters.original);
-  const url = p && p.url;
-  return url ? 'https://www.anilibria.tv' + url : '';
+  const p = release.poster || release.posters || {};
+  const candidate = p.src || p.url ||
+    (p.optimized && (p.optimized.src || p.optimized.preview)) ||
+    (p.medium && (p.medium.url || p.medium.src)) ||
+    (p.small && (p.small.url || p.small.src)) ||
+    (p.original && (p.original.url || p.original.src));
+  return candidate ? anilibriaAbsUrl(candidate) : '';
+}
+
+function anilibriaTypeStr(release) {
+  const type = release.type || {};
+  return type.description || type.full_string || type.value || type.string || '';
+}
+
+function anilibriaIsBlocked(release) {
+  const b = release.blocked;
+  if (b && typeof b === 'object') return !!(b.blocked || b.is_blocked);
+  return !!(b || release.is_blocked_by_geo);
+}
+
+function anilibriaMatchesQuery(release, q) {
+  const n = release.name || release.names || {};
+  const hay = [n.main, n.ru, n.russian, n.english, n.en, n.alternative, n.alt, release.alias, release.code]
+    .filter(Boolean).join(' ').toLowerCase();
+  return hay.indexOf(q) !== -1;
+}
+
+// Публичной документации/поиска у нового API нет, поэтому ищем перебором
+// страниц каталога и фильтруем совпадения на клиенте.
+async function anilibriaSearch(query) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return [];
+  const pageSize = 50;
+  const maxPages = 6;
+  const seen = new Set();
+  const matches = [];
+  for (let page = 1; page <= maxPages; page++) {
+    let json;
+    try {
+      json = await anilibriaFetch('/anime/catalog/releases?limit=' + pageSize + '&page=' + page);
+    } catch (err) {
+      if (page === 1) throw err;
+      break;
+    }
+    const list = anilibriaExtractList(json);
+    if (!list.length) break;
+    for (const r of list) {
+      if (r.id === undefined || seen.has(r.id)) continue;
+      seen.add(r.id);
+      if (anilibriaMatchesQuery(r, q)) matches.push(r);
+    }
+    if (matches.length >= 8 || list.length < pageSize) break;
+  }
+  return matches.slice(0, 8);
 }
 
 function anilibriaManualLinkHtml() {
@@ -1604,16 +1671,14 @@ async function anilibriaRunSearch(container, query) {
 function anilibriaRenderResults(container, results) {
   anilibriaDestroyPlayer();
   const cards = results.map(function(r, idx) {
-    const names = r.names || {};
-    const name = names.ru || names.en || r.code || ('#' + r.id);
-    const sub = names.en && names.ru ? names.en : '';
+    const name = anilibriaName(r);
     const poster = anilibriaPosterUrl(r);
-    const typeStr = (r.type && r.type.full_string) || '';
+    const typeStr = anilibriaTypeStr(r);
     return '<div class="anilibria-result-card" data-idx="' + idx + '">' +
       (poster ? '<img src="' + poster + '" alt="" loading="lazy">' : '<div class="anilibria-result-noimg">?</div>') +
       '<div class="anilibria-result-info">' +
-        '<div class="anilibria-result-title">' + escapeHtml(name) + '</div>' +
-        (sub ? '<div class="anilibria-result-sub">' + escapeHtml(sub) + '</div>' : '') +
+        '<div class="anilibria-result-title">' + escapeHtml(name.main) + '</div>' +
+        (name.sub ? '<div class="anilibria-result-sub">' + escapeHtml(name.sub) + '</div>' : '') +
         (typeStr ? '<div class="anilibria-result-sub">' + escapeHtml(typeStr) + '</div>' : '') +
       '</div>' +
     '</div>';
@@ -1630,35 +1695,46 @@ function anilibriaRenderResults(container, results) {
   });
 }
 
-function anilibriaRenderPlayer(container, release, allResults) {
-  anilibriaDestroyPlayer();
-
-  const names = release.names || {};
-  const name = names.ru || names.en || release.code;
-  const player = release.player || {};
-  const host = player.host || '';
-  const list = player.list || {};
-  const episodeKeys = Object.keys(list).sort(function(a, b) { return parseFloat(a) - parseFloat(b); });
-  const blockedNotice = (release.blocked && release.blocked.blocked)
-    ? '<p class="anilibria-blocked">' + escapeHtml(t('anilibriaBlocked')) + '</p>' : '';
-
-  let episodesHtml;
-  if (!episodeKeys.length) {
-    episodesHtml = '<p class="anilibria-hint">' + escapeHtml(t('anilibriaNoEpisodes')) + '</p>';
-  } else {
-    episodesHtml = '<div class="anilibria-episodes">' + episodeKeys.map(function(k, i) {
-      const ep = list[k];
-      const label = (ep && ep.name) ? ep.name : String(ep && ep.episode !== undefined ? ep.episode : k);
-      return '<button type="button" class="anilibria-ep-btn' + (i === 0 ? ' active' : '') + '" data-ep="' + escapeHtml(k) + '">' + escapeHtml(label) + '</button>';
-    }).join('') + '</div>';
+function anilibriaEpisodesList(release) {
+  const raw = release.episodes || release.list ||
+    (release.player && release.player.list) || release.player_episodes || [];
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === 'object') {
+    return Object.keys(raw)
+      .sort(function(a, b) { return parseFloat(a) - parseFloat(b); })
+      .map(function(k) { return raw[k]; });
   }
+  return [];
+}
 
+function anilibriaEpisodeHls(ep) {
+  const candidates = [
+    ep.hls_1080, ep.hls1080,
+    ep.hls_720, ep.hls720,
+    ep.hls_480, ep.hls480,
+    ep.hls && (ep.hls.fhd || ep.hls['1080'] || ep.hls.hd || ep.hls['720'] || ep.hls.sd || ep.hls['480']),
+    ep.hls_fhd, ep.hls_hd, ep.hls_sd
+  ];
+  for (const c of candidates) {
+    if (c && typeof c === 'string') return anilibriaAbsUrl(c);
+  }
+  return '';
+}
+
+function anilibriaEpisodeLabel(ep, idx) {
+  if (ep.name) return ep.name;
+  if (ep.name_english) return ep.name_english;
+  if (ep.ordinal !== undefined && ep.ordinal !== null) return t('anilibriaEpisodes') + ' ' + ep.ordinal;
+  return t('anilibriaEpisodes') + ' ' + (idx + 1);
+}
+
+async function anilibriaRenderPlayer(container, releaseSummary, allResults) {
+  anilibriaDestroyPlayer();
+  const name = anilibriaName(releaseSummary);
   container.innerHTML =
     '<button type="button" class="anilibria-back-btn" id="anilibriaBackBtn">' + escapeHtml(t('anilibriaBack')) + '</button>' +
-    '<h4 class="anilibria-player-title">' + escapeHtml(name) + '</h4>' +
-    blockedNotice +
-    '<div class="anilibria-video-wrap"><video id="anilibriaVideo" controls playsinline></video></div>' +
-    episodesHtml;
+    '<h4 class="anilibria-player-title">' + escapeHtml(name.main) + '</h4>' +
+    '<div class="anilibria-status"><div class="spinner" style="margin:0 auto 10px"></div>' + t('anilibriaSearching') + '</div>';
 
   const backBtn = document.getElementById('anilibriaBackBtn');
   if (backBtn) {
@@ -1667,14 +1743,57 @@ function anilibriaRenderPlayer(container, release, allResults) {
     });
   }
 
-  function playEpisode(key) {
-    const ep = list[key];
-    if (!ep || !ep.hls || !host) return;
-    const hlsPath = ep.hls.hd || ep.hls.sd || ep.hls.fhd;
-    if (!hlsPath) return;
-    const src = 'https://' + host + hlsPath;
+  let full = releaseSummary;
+  try {
+    if (releaseSummary.id !== undefined) {
+      const detail = await anilibriaFetch('/anime/releases/' + releaseSummary.id);
+      if (detail && (detail.id !== undefined || detail.data)) full = detail.data || detail;
+    }
+  } catch (err) {
+    // остаёмся на кратких данных из поиска — может, эпизоды там уже были
+  }
+
+  const episodes = anilibriaEpisodesList(full).length ? anilibriaEpisodesList(full) : anilibriaEpisodesList(releaseSummary);
+  const blockedNotice = anilibriaIsBlocked(full)
+    ? '<p class="anilibria-blocked">' + escapeHtml(t('anilibriaBlocked')) + '</p>' : '';
+
+  let episodesHtml;
+  if (!episodes.length) {
+    episodesHtml = '<p class="anilibria-hint">' + escapeHtml(t('anilibriaNoEpisodes')) + anilibriaManualLinkHtml() + '</p>';
+  } else {
+    episodesHtml = '<div class="anilibria-episodes">' + episodes.map(function(ep, i) {
+      const label = anilibriaEpisodeLabel(ep, i);
+      return '<button type="button" class="anilibria-ep-btn' + (i === 0 ? ' active' : '') + '" data-idx="' + i + '">' + escapeHtml(String(label)) + '</button>';
+    }).join('') + '</div>';
+  }
+
+  container.innerHTML =
+    '<button type="button" class="anilibria-back-btn" id="anilibriaBackBtn2">' + escapeHtml(t('anilibriaBack')) + '</button>' +
+    '<h4 class="anilibria-player-title">' + escapeHtml(name.main) + '</h4>' +
+    blockedNotice +
+    '<div class="anilibria-video-wrap"><video id="anilibriaVideo" controls playsinline></video></div>' +
+    episodesHtml;
+
+  const backBtn2 = document.getElementById('anilibriaBackBtn2');
+  if (backBtn2) {
+    backBtn2.addEventListener('click', function() {
+      anilibriaRenderResults(container, allResults);
+    });
+  }
+
+  function playEpisode(idx) {
+    const ep = episodes[idx];
+    const src = ep && anilibriaEpisodeHls(ep);
     const video = document.getElementById('anilibriaVideo');
-    if (!video) return;
+    if (!ep || !src || !video) {
+      if (video) {
+        const msg = document.createElement('p');
+        msg.className = 'anilibria-hint';
+        msg.textContent = t('anilibriaNoEpisodes');
+        video.replaceWith(msg);
+      }
+      return;
+    }
     anilibriaDestroyPlayer();
     if (window.Hls && window.Hls.isSupported()) {
       anilibriaHls = new window.Hls();
@@ -1689,11 +1808,11 @@ function anilibriaRenderPlayer(container, release, allResults) {
   container.querySelectorAll('.anilibria-ep-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       container.querySelectorAll('.anilibria-ep-btn').forEach(function(b) { b.classList.toggle('active', b === btn); });
-      playEpisode(btn.dataset.ep);
+      playEpisode(parseInt(btn.dataset.idx, 10));
     });
   });
 
-  if (episodeKeys.length) playEpisode(episodeKeys[0]);
+  if (episodes.length) playEpisode(0);
 }
 
 // ——— Modal ———
