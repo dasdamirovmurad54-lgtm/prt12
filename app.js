@@ -501,8 +501,9 @@ async function getComments(animeId) {
   if (SUPABASE_CONFIGURED) {
     try {
       const url = SUPABASE_URL + '/rest/v1/comments?anime_id=eq.' + encodeURIComponent(String(animeId)) +
-        '&select=id,nick,avatar,text,created_at&order=created_at.desc';
-      const res = await fetch(url, { headers: supabaseHeaders() });
+        '&select=id,nick,avatar,text,created_at&order=created_at.desc' +
+        '&_=' + Date.now(); // разбиваем кэш браузера, чтобы список подтягивал новые комментарии при опросе
+      const res = await fetch(url, { headers: supabaseHeaders(), cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const rows = await res.json();
       return rows.map(function(r) {
