@@ -1734,19 +1734,14 @@ async function openModal(id) {
 
     const watchHtml = '<button class="watch-btn" id="modalWatchBtn" type="button">' + t('watch') + '</button>';
     const watchQuery = encodeURIComponent(title + ' anime');
-    const vkUrl = 'https://vk.com/video?q=' + watchQuery + '&section=search';
     const watchBoxHtml =
       '<div class="watch-box hidden" id="watchBox">' +
         '<div class="watch-tabs">' +
-          '<button type="button" class="watch-tab active" data-watch="youtube">' + t('watchOnYoutube') + '</button>' +
-          '<button type="button" class="watch-tab" data-watch="vk">' + t('watchOnVk') + '</button>' +
-          '<button type="button" class="watch-tab" data-watch="anilibria">' + t('watchOnAnilibria') + '</button>' +
+          '<button type="button" class="watch-tab active" data-watch="anilibria">' + t('watchOnAnilibria') + '</button>' +
+          '<button type="button" class="watch-tab" data-watch="youtube">' + t('watchOnYoutube') + '</button>' +
         '</div>' +
-        '<div class="watch-panel active" id="watchPanelYoutube"><div class="watch-frame-wrap" id="watchFrameYoutube"></div></div>' +
-        '<div class="watch-panel" id="watchPanelVk">' +
-          '<a class="mal-btn watch-vk-link" href="' + vkUrl + '" target="_blank" rel="noopener">' + t('openVk') + '</a>' +
-        '</div>' +
-        '<div class="watch-panel" id="watchPanelAnilibria"><div class="anilibria-box" id="anilibriaBox"></div></div>' +
+        '<div class="watch-panel active" id="watchPanelAnilibria"><div class="anilibria-box" id="anilibriaBox"></div></div>' +
+        '<div class="watch-panel" id="watchPanelYoutube"><div class="watch-frame-wrap" id="watchFrameYoutube"></div></div>' +
       '</div>';
 
     let trailerHtml = '';
@@ -1831,10 +1826,10 @@ async function openModal(id) {
         box.classList.toggle('hidden');
         this.classList.toggle('active', willOpen);
         if (willOpen) {
-          const frameWrap = document.getElementById('watchFrameYoutube');
-          if (frameWrap && !frameWrap.querySelector('iframe')) {
-            frameWrap.innerHTML = '<iframe src="https://www.youtube.com/embed?listType=search&list=' + watchQuery +
-              '" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>';
+          const anilibriaBox = document.getElementById('anilibriaBox');
+          if (anilibriaBox && !anilibriaBox.dataset.loaded) {
+            anilibriaBox.dataset.loaded = '1';
+            anilibriaRunSearch(anilibriaBox, title);
           }
           box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
@@ -1846,10 +1841,8 @@ async function openModal(id) {
         const kind = tab.dataset.watch;
         document.querySelectorAll('.watch-tab').forEach(function(tb) { tb.classList.toggle('active', tb === tab); });
         const py = document.getElementById('watchPanelYoutube');
-        const pv = document.getElementById('watchPanelVk');
         const pa = document.getElementById('watchPanelAnilibria');
         if (py) py.classList.toggle('active', kind === 'youtube');
-        if (pv) pv.classList.toggle('active', kind === 'vk');
         if (pa) pa.classList.toggle('active', kind === 'anilibria');
         if (kind === 'anilibria') {
           const box = document.getElementById('anilibriaBox');
@@ -1857,10 +1850,15 @@ async function openModal(id) {
             box.dataset.loaded = '1';
             anilibriaRunSearch(box, title);
           }
-        } else {
+        } else if (kind === 'youtube') {
           anilibriaDestroyPlayer();
           const video = document.getElementById('anilibriaVideo');
           if (video) video.pause();
+          const frameWrap = document.getElementById('watchFrameYoutube');
+          if (frameWrap && !frameWrap.querySelector('iframe')) {
+            frameWrap.innerHTML = '<iframe src="https://www.youtube.com/embed?listType=search&list=' + watchQuery +
+              '" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>';
+          }
         }
       });
     });
