@@ -1456,7 +1456,8 @@ function buildMediaQuery() {
     query (
       $page: Int, $perPage: Int, $search: String, $genre: String,
       $season: MediaSeason, $seasonYear: Int, $sort: [MediaSort],
-      $status: MediaStatus, $format: MediaFormat
+      $status: MediaStatus, $format: MediaFormat,
+      $yearStart: FuzzyDateInt, $yearEnd: FuzzyDateInt
     ) {
       Page(page: $page, perPage: $perPage) {
         pageInfo { total currentPage lastPage hasNextPage }
@@ -1466,6 +1467,8 @@ function buildMediaQuery() {
           genre: $genre
           season: $season
           seasonYear: $seasonYear
+          startDate_greater: $yearStart
+          startDate_lesser: $yearEnd
           sort: $sort
           status: $status
           format: $format
@@ -1617,7 +1620,19 @@ function getVariables(page) {
   if (state.searchQuery) vars.search = state.searchQuery;
   if (state.genre) vars.genre = state.genre;
   if (state.season) vars.season = state.season;
-  if (state.year) vars.seasonYear = parseInt(state.year, 10);
+  if (state.year) {
+    var yearNum = parseInt(state.year, 10);
+    if (state.season) {
+      // AniList's seasonYear argument only filters correctly when combined
+      // with season — passing it alone is silently ignored by the API.
+      vars.seasonYear = yearNum;
+    } else {
+      // No season chosen: filter by the whole calendar year via the
+      // start date range instead (FuzzyDateInt, format YYYYMMDD).
+      vars.yearStart = yearNum * 10000;
+      vars.yearEnd = (yearNum + 1) * 10000;
+    }
+  }
 
   if (!state.searchQuery && state.currentFilter !== 'favorites') {
     if (state.currentFilter === 'airing') {
