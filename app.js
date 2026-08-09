@@ -1,4 +1,9 @@
 const ANILIST_URL = 'https://graphql.anilist.co';
+// YouTube Data API v3 — нужен свой ключ (console.cloud.google.com → APIs & Services →
+// Credentials → Create API key, затем включить "YouTube Data API v3" в библиотеке API).
+// Без ключа вкладка YouTube в плеере покажет кнопку ручного поиска вместо инлайн-результатов.
+const YOUTUBE_API_KEY = '';
+const YOUTUBE_SEARCH_URL = 'https://www.googleapis.com/youtube/v3/search';
 // AniLibria.tv была переименована в AniLiberty вместе с полным переходом на
 // новый бэкенд — старый api.anilibria.tv/v3 (и легаси public/api/index.php)
 // официально deprecated и по факту не отвечает. Актуальный API — api.anilibria.app
@@ -103,6 +108,12 @@ const i18n = {
     anilibriaBlocked: '⚠ Тайтл может быть заблокирован на территории РФ',
     anilibriaError: 'Не удалось загрузить данные с AniLibria',
     anilibriaBack: '← Другой тайтл',
+    youtubeSearching: 'Ищем на YouTube...',
+    youtubeNotFound: 'На YouTube ничего не найдено',
+    youtubeChoose: 'Результаты YouTube — выберите видео:',
+    youtubeError: 'Не удалось загрузить данные с YouTube',
+    youtubeBack: '← Другие результаты',
+    youtubeNoKey: 'Не задан ключ YouTube Data API. Откройте app.js и впишите свой ключ в YOUTUBE_API_KEY.',
     badges: 'Бейджи',
     badgeUnlocked: 'Новый бейдж!',
     themeColor: 'Цвет темы',
@@ -219,6 +230,12 @@ const i18n = {
     anilibriaBlocked: '⚠ This title may be blocked in Russia',
     anilibriaError: 'Failed to load data from AniLibria',
     anilibriaBack: '← Pick another title',
+    youtubeSearching: 'Searching YouTube...',
+    youtubeNotFound: 'Nothing found on YouTube',
+    youtubeChoose: 'YouTube results — pick a video:',
+    youtubeError: 'Failed to load data from YouTube',
+    youtubeBack: '← Other results',
+    youtubeNoKey: 'YouTube Data API key is not set. Open app.js and put your key into YOUTUBE_API_KEY.',
     badges: 'Badges',
     badgeUnlocked: 'New badge!',
     themeColor: 'Theme color',
@@ -2085,6 +2102,101 @@ async function anilibriaRenderPlayer(container, releaseSummary, allResults) {
   if (episodes.length) playEpisode(0);
 }
 
+// ——— YouTube search (YouTube Data API v3) ———
+async function youtubeSearch(query) {
+  if (!YOUTUBE_API_KEY) {
+    const err = new Error(t('youtubeNoKey'));
+    err.noKey = true;
+    throw err;
+  }
+  const params = new URLSearchParams({
+    part: 'snippet',
+    type: 'video',
+    maxResults: '8',
+    safeSearch: 'strict',
+    q: query,
+    key: YOUTUBE_API_KEY
+  });
+  const res = await fetch(YOUTUBE_SEARCH_URL + '?' + params.toString());
+  if (!res.ok) {
+    let msg = t('youtubeError');
+    try {
+      const j = await res.json();
+      if (j && j.error && j.error.message) msg = j.error.message;
+    } catch (e) { /* используем дефолтное сообщение */ }
+    throw new Error(msg);
+  }
+  const data = await res.json();
+  return (data.items || [])
+    .map(function(it) {
+      const thumbs = it.snippet && it.snippet.thumbnails;
+      const thumb = thumbs && (thumbs.medium || thumbs.high || thumbs.default);
+      return {
+        id: it.id && it.id.videoId,
+        title: (it.snippet && it.snippet.title) || '',
+        channel: (it.snippet && it.snippet.channelTitle) || '',
+        thumb: thumb ? thumb.url : ''
+      };
+    })
+    .filter(function(v) { return v.id; });
+}
+
+function youtubeManualLinkHtml(query) {
+  return '<p style="margin-top:10px"><a class="mal-btn" href="https://www.youtube.com/results?search_query=' +
+    encodeURIComponent(query) + '" target="_blank" rel="noopener">YouTube →</a></p>';
+}
+
+async function youtubeRunSearch(container, query) {
+  container.innerHTML = '<div class="anilibria-status"><div class="spinner" style="margin:0 auto 10px"></div>' + t('youtubeSearching') + '</div>';
+  try {
+    const results = await youtubeSearch(query);
+    if (!results.length) {
+      container.innerHTML = '<div class="anilibria-status">' + escapeHtml(t('youtubeNotFound')) + youtubeManualLinkHtml(query) + '</div>';
+      return;
+    }
+    youtubeRenderResults(container, results, query);
+  } catch (err) {
+    container.innerHTML = '<div class="anilibria-status">' + escapeHtml(err.message || t('youtubeError')) + youtubeManualLinkHtml(query) + '</div>';
+  }
+}
+
+function youtubeRenderResults(container, results, query) {
+  const cards = results.map(function(v, idx) {
+    return '<div class="youtube-result-card" data-idx="' + idx + '">' +
+      (v.thumb ? '<img src="' + v.thumb + '" alt="" loading="lazy">' : '<div class="anilibria-result-noimg">?</div>') +
+      '<div class="youtube-result-info">' +
+        '<div class="youtube-result-title">' + escapeHtml(v.title) + '</div>' +
+        (v.channel ? '<div class="youtube-result-sub">' + escapeHtml(v.channel) + '</div>' : '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  container.innerHTML =
+    '<p class="anilibria-hint">' + escapeHtml(t('youtubeChoose')) + '</p>' +
+    '<div class="youtube-results">' + cards + '</div>';
+
+  container.querySelectorAll('.youtube-result-card').forEach(function(card) {
+    card.addEventListener('click', function() {
+      youtubeRenderPlayer(container, results[parseInt(card.dataset.idx, 10)], results, query);
+    });
+  });
+}
+
+function youtubeRenderPlayer(container, video, results, query) {
+  container.innerHTML =
+    '<button type="button" class="anilibria-back-btn" id="youtubeBackBtn">' + escapeHtml(t('youtubeBack')) + '</button>' +
+    '<h4 class="anilibria-player-title">' + escapeHtml(video.title) + '</h4>' +
+    '<div class="watch-frame-wrap"><iframe src="https://www.youtube.com/embed/' + video.id + '?autoplay=1&rel=0" ' +
+      'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>';
+
+  const backBtn = document.getElementById('youtubeBackBtn');
+  if (backBtn) {
+    backBtn.addEventListener('click', function() {
+      youtubeRenderResults(container, results, query);
+    });
+  }
+}
+
 // ——— Modal ———
 async function openModal(id) {
   bumpStat('modals');
@@ -2122,7 +2234,6 @@ async function openModal(id) {
     if (!elements.profileModal.classList.contains('hidden')) renderLibraryTab();
 
     const watchHtml = '<button class="watch-btn" id="modalWatchBtn" type="button">' + t('watch') + '</button>';
-    const watchQuery = encodeURIComponent(title + ' anime');
     const watchBoxHtml =
       '<div class="watch-box hidden" id="watchBox">' +
         '<div class="watch-tabs">' +
@@ -2130,7 +2241,7 @@ async function openModal(id) {
           '<button type="button" class="watch-tab" data-watch="youtube">' + t('watchOnYoutube') + '</button>' +
         '</div>' +
         '<div class="watch-panel active" id="watchPanelAnilibria"><div class="anilibria-box" id="anilibriaBox"></div></div>' +
-        '<div class="watch-panel" id="watchPanelYoutube"><div class="watch-frame-wrap" id="watchFrameYoutube"></div></div>' +
+        '<div class="watch-panel" id="watchPanelYoutube"><div class="anilibria-box" id="youtubeBox"></div></div>' +
       '</div>';
 
     let trailerHtml = '';
@@ -2246,10 +2357,10 @@ async function openModal(id) {
           anilibriaDestroyPlayer();
           const video = document.getElementById('anilibriaVideo');
           if (video) video.pause();
-          const frameWrap = document.getElementById('watchFrameYoutube');
-          if (frameWrap && !frameWrap.querySelector('iframe')) {
-            frameWrap.innerHTML = '<iframe src="https://www.youtube.com/embed?listType=search&list=' + watchQuery +
-              '" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>';
+          const box = document.getElementById('youtubeBox');
+          if (box && !box.dataset.loaded) {
+            box.dataset.loaded = '1';
+            youtubeRunSearch(box, title + ' anime');
           }
         }
       });
