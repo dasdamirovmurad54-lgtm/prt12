@@ -2,7 +2,7 @@ const ANILIST_URL = 'https://graphql.anilist.co';
 // YouTube Data API v3 — нужен свой ключ (console.cloud.google.com → APIs & Services →
 // Credentials → Create API key, затем включить "YouTube Data API v3" в библиотеке API).
 // Без ключа вкладка YouTube в плеере покажет кнопку ручного поиска вместо инлайн-результатов.
-const YOUTUBE_API_KEY = 'AIzaSyALqBJyRX-Jl1Cs5oFDVDJ2cZYH7eKtZws';
+const YOUTUBE_API_KEY = '';
 const YOUTUBE_SEARCH_URL = 'https://www.googleapis.com/youtube/v3/search';
 // AniLibria.tv была переименована в AniLiberty вместе с полным переходом на
 // новый бэкенд — старый api.anilibria.tv/v3 (и легаси public/api/index.php)
@@ -111,6 +111,7 @@ const i18n = {
     youtubeSearching: 'Ищем на YouTube...',
     youtubeNotFound: 'На YouTube ничего не найдено',
     youtubeChoose: 'Результаты YouTube — выберите видео:',
+    youtubeChooseFallback: 'Точных совпадений («все серии» / «полностью») не нашлось — вот обычные результаты:',
     youtubeError: 'Не удалось загрузить данные с YouTube',
     youtubeBack: '← Другие результаты',
     youtubeNoKey: 'Не задан ключ YouTube Data API. Откройте app.js и впишите свой ключ в YOUTUBE_API_KEY.',
@@ -233,6 +234,7 @@ const i18n = {
     youtubeSearching: 'Searching YouTube...',
     youtubeNotFound: 'Nothing found on YouTube',
     youtubeChoose: 'YouTube results — pick a video:',
+    youtubeChooseFallback: 'No exact matches for "all episodes" / "full" — showing regular results:',
     youtubeError: 'Failed to load data from YouTube',
     youtubeBack: '← Other results',
     youtubeNoKey: 'YouTube Data API key is not set. Open app.js and put your key into YOUTUBE_API_KEY.',
@@ -2103,6 +2105,21 @@ async function anilibriaRenderPlayer(container, releaseSummary, allResults) {
 }
 
 // ——— YouTube search (YouTube Data API v3) ———
+function youtubeFullKeywords() {
+  return state.lang === 'en'
+    ? ['all episodes', 'full episodes', 'complete']
+    : ['все серии', 'полностью'];
+}
+
+function youtubeTitleMatchesFull(title) {
+  const low = (title || '').toLowerCase();
+  return youtubeFullKeywords().some(function(kw) { return low.indexOf(kw) !== -1; });
+}
+
+function youtubeBuildQuery(animeTitle) {
+  return animeTitle + ' anime ' + youtubeFullKeywords().join(' ');
+}
+
 async function youtubeSearch(query) {
   if (!YOUTUBE_API_KEY) {
     const err = new Error(t('youtubeNoKey'));
@@ -2146,7 +2163,8 @@ function youtubeManualLinkHtml(query) {
     encodeURIComponent(query) + '" target="_blank" rel="noopener">YouTube →</a></p>';
 }
 
-async function youtubeRunSearch(container, query) {
+async function youtubeRunSearch(container, animeTitle) {
+  const query = youtubeBuildQuery(animeTitle);
   container.innerHTML = '<div class="anilibria-status"><div class="spinner" style="margin:0 auto 10px"></div>' + t('youtubeSearching') + '</div>';
   try {
     const results = await youtubeSearch(query);
@@ -2154,13 +2172,17 @@ async function youtubeRunSearch(container, query) {
       container.innerHTML = '<div class="anilibria-status">' + escapeHtml(t('youtubeNotFound')) + youtubeManualLinkHtml(query) + '</div>';
       return;
     }
-    youtubeRenderResults(container, results, query);
+    // Оставляем только видео, где в названии реально есть "все серии"/"полностью"
+    // (или их англ. аналоги) — если таких нет, показываем весь список как запасной вариант.
+    const exact = results.filter(function(v) { return youtubeTitleMatchesFull(v.title); });
+    const finalResults = exact.length ? exact : results;
+    youtubeRenderResults(container, finalResults, query, exact.length > 0);
   } catch (err) {
     container.innerHTML = '<div class="anilibria-status">' + escapeHtml(err.message || t('youtubeError')) + youtubeManualLinkHtml(query) + '</div>';
   }
 }
 
-function youtubeRenderResults(container, results, query) {
+function youtubeRenderResults(container, results, query, exactMatch) {
   const cards = results.map(function(v, idx) {
     return '<div class="youtube-result-card" data-idx="' + idx + '">' +
       (v.thumb ? '<img src="' + v.thumb + '" alt="" loading="lazy">' : '<div class="anilibria-result-noimg">?</div>') +
@@ -2172,17 +2194,17 @@ function youtubeRenderResults(container, results, query) {
   }).join('');
 
   container.innerHTML =
-    '<p class="anilibria-hint">' + escapeHtml(t('youtubeChoose')) + '</p>' +
+    '<p class="anilibria-hint">' + escapeHtml(t(exactMatch ? 'youtubeChoose' : 'youtubeChooseFallback')) + '</p>' +
     '<div class="youtube-results">' + cards + '</div>';
 
   container.querySelectorAll('.youtube-result-card').forEach(function(card) {
     card.addEventListener('click', function() {
-      youtubeRenderPlayer(container, results[parseInt(card.dataset.idx, 10)], results, query);
+      youtubeRenderPlayer(container, results[parseInt(card.dataset.idx, 10)], results, query, exactMatch);
     });
   });
 }
 
-function youtubeRenderPlayer(container, video, results, query) {
+function youtubeRenderPlayer(container, video, results, query, exactMatch) {
   container.innerHTML =
     '<button type="button" class="anilibria-back-btn" id="youtubeBackBtn">' + escapeHtml(t('youtubeBack')) + '</button>' +
     '<h4 class="anilibria-player-title">' + escapeHtml(video.title) + '</h4>' +
@@ -2192,7 +2214,7 @@ function youtubeRenderPlayer(container, video, results, query) {
   const backBtn = document.getElementById('youtubeBackBtn');
   if (backBtn) {
     backBtn.addEventListener('click', function() {
-      youtubeRenderResults(container, results, query);
+      youtubeRenderResults(container, results, query, exactMatch);
     });
   }
 }
@@ -2360,7 +2382,7 @@ async function openModal(id) {
           const box = document.getElementById('youtubeBox');
           if (box && !box.dataset.loaded) {
             box.dataset.loaded = '1';
-            youtubeRunSearch(box, title + ' anime');
+            youtubeRunSearch(box, title);
           }
         }
       });
