@@ -96,7 +96,7 @@ const i18n = {
     emptyWatched: 'Пока ничего не просмотрено.<br>Открой карточку аниме, чтобы она попала сюда.',
     level: 'Уровень',
     changeAvatar: 'Изменить аватар',
-    watchOnYoutube: 'YouTube',
+    watchOnYoutube: 'YouTube Shorts',
     watchOnVk: 'VK',
     openVk: 'Открыть поиск на VK Видео →',
     watchOnAnilibria: 'AniLibria',
@@ -108,10 +108,10 @@ const i18n = {
     anilibriaBlocked: '⚠ Тайтл может быть заблокирован на территории РФ',
     anilibriaError: 'Не удалось загрузить данные с AniLibria',
     anilibriaBack: '← Другой тайтл',
-    youtubeSearching: 'Ищем на YouTube...',
-    youtubeNotFound: 'На YouTube ничего не найдено',
-    youtubeChoose: 'Результаты YouTube — выберите видео:',
-    youtubeChooseFallback: 'Точных совпадений («все серии» / «полностью») не нашлось — вот обычные результаты:',
+    youtubeSearching: 'Ищем шортсы на YouTube...',
+    youtubeNotFound: 'Шортсы не найдены',
+    youtubeChoose: 'Шортсы по этому тайтлу — выберите видео:',
+    youtubeChooseFallback: 'Шортсов с названием тайтла в заголовке не нашлось — вот похожие короткие видео:',
     youtubeError: 'Не удалось загрузить данные с YouTube',
     youtubeBack: '← Другие результаты',
     youtubeNoKey: 'Не задан ключ YouTube Data API. Откройте app.js и впишите свой ключ в YOUTUBE_API_KEY.',
@@ -219,7 +219,7 @@ const i18n = {
     emptyWatched: 'Nothing watched yet.<br>Open an anime card to add it here.',
     level: 'Level',
     changeAvatar: 'Change avatar',
-    watchOnYoutube: 'YouTube',
+    watchOnYoutube: 'YouTube Shorts',
     watchOnVk: 'VK',
     openVk: 'Open VK Video search →',
     watchOnAnilibria: 'AniLibria',
@@ -231,10 +231,10 @@ const i18n = {
     anilibriaBlocked: '⚠ This title may be blocked in Russia',
     anilibriaError: 'Failed to load data from AniLibria',
     anilibriaBack: '← Pick another title',
-    youtubeSearching: 'Searching YouTube...',
-    youtubeNotFound: 'Nothing found on YouTube',
-    youtubeChoose: 'YouTube results — pick a video:',
-    youtubeChooseFallback: 'No exact matches for "all episodes" / "full" — showing regular results:',
+    youtubeSearching: 'Searching YouTube Shorts...',
+    youtubeNotFound: 'No Shorts found',
+    youtubeChoose: 'Shorts about this title — pick a video:',
+    youtubeChooseFallback: 'No Shorts with the title in the name — here are similar short videos:',
     youtubeError: 'Failed to load data from YouTube',
     youtubeBack: '← Other results',
     youtubeNoKey: 'YouTube Data API key is not set. Open app.js and put your key into YOUTUBE_API_KEY.',
@@ -2104,20 +2104,24 @@ async function anilibriaRenderPlayer(container, releaseSummary, allResults) {
   if (episodes.length) playEpisode(0);
 }
 
-// ——— YouTube search (YouTube Data API v3) ———
-function youtubeFullKeywords() {
-  return state.lang === 'en'
-    ? ['all episodes', 'full episodes', 'complete']
-    : ['все серии', 'полностью'];
+// ——— YouTube Shorts search (YouTube Data API v3) ———
+function normalizeForMatch(s) {
+  return (s || '')
+    .toLowerCase()
+    .replace(/[«»"'.,:!?()\-–—]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-function youtubeTitleMatchesFull(title) {
-  const low = (title || '').toLowerCase();
-  return youtubeFullKeywords().some(function(kw) { return low.indexOf(kw) !== -1; });
+function youtubeTitleMatchesAnime(videoTitle, animeTitle) {
+  const v = normalizeForMatch(videoTitle);
+  const a = normalizeForMatch(animeTitle);
+  if (!a) return false;
+  return v.indexOf(a) !== -1;
 }
 
 function youtubeBuildQuery(animeTitle) {
-  return animeTitle + ' anime ' + youtubeFullKeywords().join(' ');
+  return animeTitle + ' shorts';
 }
 
 async function youtubeSearch(query) {
@@ -2129,8 +2133,9 @@ async function youtubeSearch(query) {
   const params = new URLSearchParams({
     part: 'snippet',
     type: 'video',
-    maxResults: '8',
+    maxResults: '12',
     safeSearch: 'strict',
+    videoDuration: 'short', // ограничивает выдачу видео короче 4 минут — ближайшее, что даёт API для шортсов
     q: query,
     key: YOUTUBE_API_KEY
   });
@@ -2172,9 +2177,9 @@ async function youtubeRunSearch(container, animeTitle) {
       container.innerHTML = '<div class="anilibria-status">' + escapeHtml(t('youtubeNotFound')) + youtubeManualLinkHtml(query) + '</div>';
       return;
     }
-    // Оставляем только видео, где в названии реально есть "все серии"/"полностью"
-    // (или их англ. аналоги) — если таких нет, показываем весь список как запасной вариант.
-    const exact = results.filter(function(v) { return youtubeTitleMatchesFull(v.title); });
+    // Оставляем только ролики, в названии которых реально встречается название тайтла —
+    // если таких нет, показываем весь список коротких видео как запасной вариант.
+    const exact = results.filter(function(v) { return youtubeTitleMatchesAnime(v.title, animeTitle); });
     const finalResults = exact.length ? exact : results;
     youtubeRenderResults(container, finalResults, query, exact.length > 0);
   } catch (err) {
@@ -2208,7 +2213,7 @@ function youtubeRenderPlayer(container, video, results, query, exactMatch) {
   container.innerHTML =
     '<button type="button" class="anilibria-back-btn" id="youtubeBackBtn">' + escapeHtml(t('youtubeBack')) + '</button>' +
     '<h4 class="anilibria-player-title">' + escapeHtml(video.title) + '</h4>' +
-    '<div class="watch-frame-wrap"><iframe src="https://www.youtube.com/embed/' + video.id + '?autoplay=1&rel=0" ' +
+    '<div class="watch-frame-wrap shorts-frame"><iframe src="https://www.youtube.com/embed/' + video.id + '?autoplay=1&rel=0" ' +
       'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>';
 
   const backBtn = document.getElementById('youtubeBackBtn');
