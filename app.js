@@ -6,14 +6,27 @@ const YOUTUBE_API_KEY = 'AIzaSyALqBJyRX-Jl1Cs5oFDVDJ2cZYH7eKtZws';
 const YOUTUBE_SEARCH_URL = 'https://www.googleapis.com/youtube/v3/search';
 // AniLibria.tv была переименована в AniLiberty вместе с полным переходом на
 // новый бэкенд — старый api.anilibria.tv/v3 (и легаси public/api/index.php)
-// официально deprecated и по факту не отвечает. Актуальный API — api.anilibria.app
-// (он же зеркалится на anilibria.top / aniliberty.top), но публичной схемы
-// ответа у него нет, поэтому парсинг ниже сделан defensively: пробует
-// несколько вероятных вариантов названия полей вместо одного жёстко заданного.
-// Запросы всё ещё идут через публичный CORS-прокси allorigins.win, так как
-// неизвестно, отдаёт ли новый API заголовок Access-Control-Allow-Origin.
-const ANILIBRIA_API = 'https://api.anilibria.app/api/v1';
-const ANILIBRIA_ORIGIN = 'https://anilibria.top';
+// официально deprecated и по факту не отвечает. Актуальный бэкенд живёт
+// на anilibria.top/api/v1 (это же дефолтный адрес в официальных SDK), и
+// зеркалится на aniliberty.top и api.anilibria.app. Публичной документации
+// по полям ответа мало, поэтому: (1) пробуем несколько хостов по очереди —
+// "любой ценой" значит не сдаваться после первого же CORS/сетевого фейла,
+// и (2) парсинг ниже сделан defensively — пробует несколько вероятных
+// вариантов названия полей вместо одного жёстко заданного.
+// Запросы идут через публичный CORS-прокси allorigins.win, так как не
+// гарантировано, что API отдаёт заголовок Access-Control-Allow-Origin для
+// произвольных сайтов.
+const ANILIBRIA_HOSTS = [
+  'https://anilibria.top/api/v1',
+  'https://aniliberty.top/api/v1',
+  'https://api.anilibria.app/api/v1'
+];
+const ANILIBRIA_ORIGINS = [
+  'https://anilibria.top',
+  'https://aniliberty.top'
+];
+let ANILIBRIA_API = ANILIBRIA_HOSTS[0];
+let ANILIBRIA_ORIGIN = ANILIBRIA_ORIGINS[0];
 const ANILIBRIA_CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 const PER_PAGE = 24;
 const FAV_KEY = 'animeroom_favorites';
@@ -1834,25 +1847,36 @@ function anilibriaDestroyPlayer() {
   }
 }
 
-async function anilibriaFetch(path) {
-  const targetUrl = ANILIBRIA_API + path;
+async function anilibriaFetchOnce(host, path) {
+  const targetUrl = host + path;
   const proxiedUrl = ANILIBRIA_CORS_PROXY + encodeURIComponent(targetUrl);
-  let res;
-  try {
-    res = await fetch(proxiedUrl);
-  } catch (e) {
-    throw new Error(t('anilibriaError'));
-  }
-  let json;
-  try {
-    json = await res.json();
-  } catch (e) {
-    throw new Error(t('anilibriaError'));
-  }
+  const res = await fetch(proxiedUrl);
+  const json = await res.json();
   if (!res.ok || (json && json.error)) {
     throw new Error((json && json.error && json.error.message) || t('anilibriaError'));
   }
   return json;
+}
+
+// "Любой ценой": если текущий хост не отвечает (сеть/CORS/5xx), пробуем
+// остальные известные зеркала по очереди, прежде чем сдаться. Как только
+// какой-то хост сработал, запоминаем его как основной для дальнейших запросов.
+async function anilibriaFetch(path) {
+  const hostsToTry = [ANILIBRIA_API].concat(ANILIBRIA_HOSTS.filter(function(h) { return h !== ANILIBRIA_API; }));
+  let lastErr = null;
+  for (const host of hostsToTry) {
+    try {
+      const json = await anilibriaFetchOnce(host, path);
+      if (host !== ANILIBRIA_API) {
+        ANILIBRIA_API = host;
+        ANILIBRIA_ORIGIN = host.indexOf('aniliberty.top') !== -1 ? 'https://aniliberty.top' : 'https://anilibria.top';
+      }
+      return json;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw new Error((lastErr && lastErr.message) || t('anilibriaError'));
 }
 
 function anilibriaExtractList(json) {
@@ -1910,11 +1934,32 @@ function anilibriaMatchesQuery(release, q) {
   return hay.indexOf(q) !== -1;
 }
 
-// Публичной документации/поиска у нового API нет, поэтому ищем перебором
-// страниц каталога и фильтруем совпадения на клиенте.
-async function anilibriaSearch(query) {
-  const q = (query || '').trim().toLowerCase();
-  if (!q) return [];
+// Пробуем несколько вероятных путей выделенного поиска (публичной схемы
+// у нового API нет, поэтому "любой ценой" — перебираем варианты). Как
+// только один из них возвращает непустой список — используем его.
+const ANILIBRIA_SEARCH_PATHS = [
+  '/app/search/releases?query=',
+  '/anime/releases/search/titles?query=',
+  '/anime/catalog/releases/search?query=',
+  '/anime/catalog/search/releases?query='
+];
+
+async function anilibriaSearchViaEndpoint(query) {
+  for (const path of ANILIBRIA_SEARCH_PATHS) {
+    try {
+      const json = await anilibriaFetch(path + encodeURIComponent(query));
+      const list = anilibriaExtractList(json);
+      if (list.length) return list;
+    } catch (e) {
+      // пробуем следующий вариант пути
+    }
+  }
+  return null;
+}
+
+// Резервный вариант, если ни один поисковый путь не сработал: перебираем
+// страницы каталога и фильтруем совпадения на клиенте.
+async function anilibriaSearchViaCatalog(q) {
   const pageSize = 50;
   const maxPages = 6;
   const seen = new Set();
@@ -1936,7 +1981,22 @@ async function anilibriaSearch(query) {
     }
     if (matches.length >= 8 || list.length < pageSize) break;
   }
-  return matches.slice(0, 8);
+  return matches;
+}
+
+async function anilibriaSearch(query) {
+  const qRaw = (query || '').trim();
+  const q = qRaw.toLowerCase();
+  if (!q) return [];
+
+  const viaEndpoint = await anilibriaSearchViaEndpoint(qRaw);
+  if (viaEndpoint && viaEndpoint.length) {
+    const filtered = viaEndpoint.filter(function(r) { return anilibriaMatchesQuery(r, q); });
+    return (filtered.length ? filtered : viaEndpoint).slice(0, 8);
+  }
+
+  const viaCatalog = await anilibriaSearchViaCatalog(q);
+  return viaCatalog.slice(0, 8);
 }
 
 function anilibriaManualLinkHtml() {
