@@ -1024,6 +1024,58 @@ body {
   color: #fff;
 }
 
+/* YouTube search results panel (реиспользует .anilibria-status/.anilibria-hint/
+   .anilibria-back-btn/.anilibria-player-title, отличаются только карточки —
+   16:9 превью вместо постеров 2:3) */
+.youtube-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.youtube-result-card {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-card);
+  transition: border-color 0.2s, transform 0.15s;
+}
+
+.youtube-result-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.youtube-result-card img {
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: cover;
+  display: block;
+}
+
+.youtube-result-info {
+  padding: 8px;
+}
+
+.youtube-result-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+  margin-bottom: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.youtube-result-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
 /* Comments section in modal (под плеером) */
 .comments-section {
   margin-top: 20px;
