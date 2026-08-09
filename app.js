@@ -2,7 +2,7 @@ const ANILIST_URL = 'https://graphql.anilist.co';
 // YouTube Data API v3 — нужен свой ключ (console.cloud.google.com → APIs & Services →
 // Credentials → Create API key, затем включить "YouTube Data API v3" в библиотеке API).
 // Без ключа вкладка YouTube в плеере покажет кнопку ручного поиска вместо инлайн-результатов.
-const YOUTUBE_API_KEY = '';
+const YOUTUBE_API_KEY = 'AIzaSyALqBJyRX-Jl1Cs5oFDVDJ2cZYH7eKtZws';
 const YOUTUBE_SEARCH_URL = 'https://www.googleapis.com/youtube/v3/search';
 // AniLibria.tv была переименована в AniLiberty вместе с полным переходом на
 // новый бэкенд — старый api.anilibria.tv/v3 (и легаси public/api/index.php)
