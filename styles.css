@@ -1024,12 +1024,12 @@ body {
   color: #fff;
 }
 
-/* YouTube search results panel (реиспользует .anilibria-status/.anilibria-hint/
+/* YouTube Shorts search results panel (реиспользует .anilibria-status/.anilibria-hint/
    .anilibria-back-btn/.anilibria-player-title, отличаются только карточки —
-   16:9 превью вместо постеров 2:3) */
+   вертикальные 9:16 превью вместо постеров 2:3) */
 .youtube-results {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
   gap: 10px;
 }
 
@@ -1049,7 +1049,7 @@ body {
 
 .youtube-result-card img {
   width: 100%;
-  aspect-ratio: 16/9;
+  aspect-ratio: 9/16;
   object-fit: cover;
   display: block;
 }
@@ -1074,6 +1074,13 @@ body {
   font-size: 0.72rem;
   color: var(--text-muted);
   line-height: 1.3;
+}
+
+/* Вертикальный (9:16) вариант плеера — под формат шортсов */
+.watch-frame-wrap.shorts-frame {
+  max-width: 320px;
+  margin: 0 auto;
+  padding-bottom: 177.78%;
 }
 
 /* Comments section in modal (под плеером) */
